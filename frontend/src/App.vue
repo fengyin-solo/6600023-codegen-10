@@ -13,6 +13,76 @@
         <p class="text-xs text-gray-500 mt-1">心电实时监测与心律失常检测</p>
       </div>
 
+      <!-- Preset Scenarios -->
+      <div class="mb-5">
+        <h3 class="text-sm font-semibold text-gray-300 mb-2">监测场景预设</h3>
+        <div class="space-y-2">
+          <button
+            v-for="preset in store.presetList"
+            :key="preset.id"
+            @click="store.applyPresetAndAnalyze(preset.id)"
+            :class="[
+              'w-full p-3 rounded-lg border text-left transition-all group',
+              store.selectedPreset === preset.id
+                ? getPresetActiveClass(preset.color)
+                : 'bg-gray-800/50 border-gray-700 text-gray-400 hover:border-gray-600 hover:bg-gray-800',
+            ]"
+          >
+            <div class="flex items-start gap-2.5">
+              <div :class="[
+                'w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all',
+                store.selectedPreset === preset.id
+                  ? getPresetIconBgClass(preset.color)
+                  : 'bg-gray-700 text-gray-400 group-hover:bg-gray-600',
+              ]">
+                <svg v-if="preset.icon === 'chair'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+                <svg v-else-if="preset.icon === 'activity'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <svg v-else-if="preset.icon === 'moon'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                </svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center justify-between">
+                  <span :class="[
+                    'text-sm font-medium',
+                    store.selectedPreset === preset.id ? getPresetTextClass(preset.color) : 'text-gray-300',
+                  ]">{{ preset.name }}</span>
+                  <span v-if="store.selectedPreset === preset.id" :class="[
+                    'text-xs px-1.5 py-0.5 rounded',
+                    getPresetBadgeClass(preset.color),
+                  ]">当前</span>
+                </div>
+                <p class="text-xs mt-0.5 opacity-70 leading-snug">{{ preset.description }}</p>
+                <div class="flex flex-wrap gap-2 mt-1.5">
+                  <span :class="[
+                    'text-xs px-1.5 py-0.5 rounded',
+                    store.selectedPreset === preset.id ? 'bg-white/10' : 'bg-gray-700/50',
+                  ]">
+                    {{ preset.heartRate }} BPM
+                  </span>
+                  <span :class="[
+                    'text-xs px-1.5 py-0.5 rounded',
+                    store.selectedPreset === preset.id ? 'bg-white/10' : 'bg-gray-700/50',
+                  ]">
+                    {{ preset.duration }}s
+                  </span>
+                  <span :class="[
+                    'text-xs px-1.5 py-0.5 rounded',
+                    store.selectedPreset === preset.id ? 'bg-white/10' : 'bg-gray-700/50',
+                  ]">
+                    导联 {{ preset.defaultLead }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+
       <!-- Lead Selector -->
       <div class="mb-5">
         <h3 class="text-sm font-semibold text-gray-300 mb-2">导联选择</h3>
@@ -36,19 +106,20 @@
       <!-- Heart Rate Control -->
       <div class="mb-5">
         <h3 class="text-sm font-semibold text-gray-300 mb-2">
-          模拟心率: <span class="text-emerald-400">{{ store.heartRate }} BPM</span>
+          模拟心率: <span :class="getPresetTextClass(store.currentPreset.color)">{{ store.heartRate }} BPM</span>
         </h3>
         <input
           type="range"
-          min="30"
-          max="180"
+          :min="store.heartRateMin"
+          :max="store.heartRateMax"
           :value="store.heartRate"
           @input="store.setHeartRate(Number(($event.target as HTMLInputElement).value))"
-          class="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+          class="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+          :class="getPresetAccentClass(store.currentPreset.color)"
         />
         <div class="flex justify-between text-xs text-gray-500 mt-1">
-          <span>30</span>
-          <span>180</span>
+          <span>{{ store.heartRateMin }}</span>
+          <span>{{ store.heartRateMax }}</span>
         </div>
       </div>
 
@@ -118,7 +189,7 @@
     <!-- Main Content -->
     <main class="flex-1 overflow-y-auto p-5 space-y-4">
       <!-- Status Bar -->
-      <div class="flex items-center justify-between bg-gray-900/60 rounded-lg px-4 py-2.5 border border-gray-800">
+      <div class="flex flex-wrap items-center justify-between gap-3 bg-gray-900/60 rounded-lg px-4 py-2.5 border border-gray-800">
         <div class="flex items-center gap-3">
           <div
             :class="[
@@ -130,8 +201,19 @@
             {{ store.isMonitoring ? '实时监测中' : '待机状态' }}
           </span>
           <span class="text-xs text-gray-500">|</span>
+          <span :class="[
+            'text-xs px-2 py-0.5 rounded font-medium',
+            getPresetBadgeBgClass(store.currentPreset.color),
+          ]">
+            {{ store.currentPreset.name }}
+          </span>
+          <span class="text-xs text-gray-500">|</span>
           <span class="text-sm text-gray-400">
             导联: <span class="text-emerald-400 font-medium">{{ store.selectedLead }}</span>
+          </span>
+          <span class="text-xs text-gray-500">|</span>
+          <span class="text-sm text-gray-400">
+            采样率: <span class="text-cyan-400 font-medium">{{ store.samplingRate }} Hz</span>
           </span>
         </div>
         <div class="text-sm text-gray-400">
@@ -252,8 +334,61 @@ function getEventLabel(type: string): string {
   return labels[type] || type;
 }
 
+function getPresetActiveClass(color: string): string {
+  const classes: Record<string, string> = {
+    emerald: 'bg-emerald-500/10 border-emerald-500/40 text-emerald-100',
+    orange: 'bg-orange-500/10 border-orange-500/40 text-orange-100',
+    indigo: 'bg-indigo-500/10 border-indigo-500/40 text-indigo-100',
+  };
+  return classes[color] || classes.emerald;
+}
+
+function getPresetIconBgClass(color: string): string {
+  const classes: Record<string, string> = {
+    emerald: 'bg-emerald-500/20 text-emerald-400',
+    orange: 'bg-orange-500/20 text-orange-400',
+    indigo: 'bg-indigo-500/20 text-indigo-400',
+  };
+  return classes[color] || classes.emerald;
+}
+
+function getPresetTextClass(color: string): string {
+  const classes: Record<string, string> = {
+    emerald: 'text-emerald-400',
+    orange: 'text-orange-400',
+    indigo: 'text-indigo-400',
+  };
+  return classes[color] || classes.emerald;
+}
+
+function getPresetBadgeClass(color: string): string {
+  const classes: Record<string, string> = {
+    emerald: 'bg-emerald-500/20 text-emerald-300',
+    orange: 'bg-orange-500/20 text-orange-300',
+    indigo: 'bg-indigo-500/20 text-indigo-300',
+  };
+  return classes[color] || classes.emerald;
+}
+
+function getPresetBadgeBgClass(color: string): string {
+  const classes: Record<string, string> = {
+    emerald: 'bg-emerald-500/15 text-emerald-400',
+    orange: 'bg-orange-500/15 text-orange-400',
+    indigo: 'bg-indigo-500/15 text-indigo-400',
+  };
+  return classes[color] || classes.emerald;
+}
+
+function getPresetAccentClass(color: string): string {
+  const classes: Record<string, string> = {
+    emerald: 'accent-emerald-500',
+    orange: 'accent-orange-500',
+    indigo: 'accent-indigo-500',
+  };
+  return classes[color] || classes.emerald;
+}
+
 onMounted(() => {
-  // Auto-start monitoring on mount
   store.analyzeECG();
 });
 

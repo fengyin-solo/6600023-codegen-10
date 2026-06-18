@@ -1,6 +1,15 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { ECGLead, HRVData, RPeak, ArrhythmiaEvent, ECGAnalysisResponse } from '../types';
+import type {
+  ECGLead,
+  HRVData,
+  RPeak,
+  ArrhythmiaEvent,
+  ECGAnalysisResponse,
+  ECGPreset,
+  PresetScenario,
+} from '../types';
+import { ECG_PRESETS } from '../types';
 
 // Gaussian function for PQRST wave simulation
 function gaussian(x: number, amplitude: number, center: number, width: number): number {
@@ -45,10 +54,16 @@ function generatePQRSTCycle(tNorm: number, config: LeadConfig): number {
 
 export const useECGStore = defineStore('ecg', () => {
   // State
+  const selectedPreset = ref<PresetScenario>('resting');
   const selectedLead = ref<string>('II');
   const heartRate = ref<number>(72);
+  const heartRateMin = ref<number>(60);
+  const heartRateMax = ref<number>(100);
   const samplingRate = ref<number>(500);
   const duration = ref<number>(10);
+  const stElevationBias = ref<number>(0.0);
+  const noiseLevel = ref<number>(0.02);
+  const hrvIntensity = ref<number>(0.02);
   const isMonitoring = ref<boolean>(false);
   const ecgData = ref<ECGLead | null>(null);
   const hrvData = ref<HRVData | null>(null);
@@ -57,6 +72,7 @@ export const useECGStore = defineStore('ecg', () => {
   const isLoading = ref<boolean>(false);
   const useBackend = ref<boolean>(false);
   const backendUrl = ref<string>('http://localhost:8000');
+  const lastPresetSwitch = ref<number>(0);
 
   let animationTimer: ReturnType<typeof setInterval> | null = null;
   let scrollOffset = ref<number>(0);
@@ -65,6 +81,8 @@ export const useECGStore = defineStore('ecg', () => {
   const currentSamples = computed(() => ecgData.value?.samples ?? []);
   const currentRPeaks = computed(() => ecgData.value?.rPeaks ?? []);
   const currentHeartRate = computed(() => hrvData.value?.heartRate ?? heartRate.value);
+  const currentPreset = computed((): ECGPreset => ECG_PRESETS[selectedPreset.value]);
+  const presetList = computed((): ECGPreset[] => Object.values(ECG_PRESETS));
 
   // Actions
 
@@ -74,24 +92,28 @@ export const useECGStore = defineStore('ecg', () => {
   function generateECGWaveform(): ECGLead {
     const totalSamples = Math.floor(duration.value * samplingRate.value);
     const samples: number[] = new Array(totalSamples);
-    const config = LEAD_CONFIGS[selectedLead.value] || LEAD_CONFIGS['II'];
+    const baseConfig = LEAD_CONFIGS[selectedLead.value] || LEAD_CONFIGS['II'];
+    const config = {
+      ...baseConfig,
+      stElevation: baseConfig.stElevation + stElevationBias.value,
+    };
     const cycleDuration = 60.0 / heartRate.value;
-    const samplesPerCycle = Math.floor(cycleDuration * samplingRate.value);
 
     for (let i = 0; i < totalSamples; i++) {
       const time = i / samplingRate.value;
       const cyclePosition = (time % cycleDuration) / cycleDuration;
 
-      // Add slight HRV variation per beat
       const beatIndex = Math.floor(time / cycleDuration);
-      const hrvFactor = 1.0 + Math.sin(beatIndex * 0.7) * 0.02;
+      const hrvPhase = beatIndex * 0.7;
+      const hrvFactor = 1.0
+        + Math.sin(hrvPhase) * hrvIntensity.value
+        + Math.cos(hrvPhase * 1.3) * hrvIntensity.value * 0.5;
 
       samples[i] = generatePQRSTCycle(cyclePosition, config) * hrvFactor;
 
-      // Add baseline wander
       samples[i] += 0.03 * Math.sin(2 * Math.PI * 0.15 * time);
-      // Add small noise
-      samples[i] += (Math.random() - 0.5) * 0.02;
+      samples[i] += 0.015 * Math.sin(2 * Math.PI * 0.08 * time + 0.5);
+      samples[i] += (Math.random() - 0.5) * noiseLevel.value;
     }
 
     return {
@@ -265,7 +287,6 @@ export const useECGStore = defineStore('ecg', () => {
     isLoading.value = true;
 
     if (useBackend.value) {
-      // Use backend API
       try {
         const response = await fetch(`${backendUrl.value}/ecg/analyze`, {
           method: 'POST',
@@ -275,6 +296,10 @@ export const useECGStore = defineStore('ecg', () => {
             duration: duration.value,
             sampling_rate: samplingRate.value,
             heart_rate: heartRate.value,
+            preset_scenario: selectedPreset.value,
+            st_elevation_bias: stElevationBias.value,
+            noise_level: noiseLevel.value,
+            hrv_intensity: hrvIntensity.value,
           }),
         });
         const data: ECGAnalysisResponse = await response.json();
@@ -305,7 +330,6 @@ export const useECGStore = defineStore('ecg', () => {
         rhythmDiagnosis.value = data.rhythm_diagnosis;
       } catch (error) {
         console.error('Backend API error:', error);
-        // Fallback to frontend simulation
         runFrontendAnalysis();
       }
     } else {
@@ -313,6 +337,39 @@ export const useECGStore = defineStore('ecg', () => {
     }
 
     isLoading.value = false;
+  }
+
+  /**
+   * Switch ECG preset scenario and immediately analyze
+   */
+  function applyPreset(presetId: PresetScenario) {
+    const preset = ECG_PRESETS[presetId];
+    if (!preset) return;
+
+    selectedPreset.value = presetId;
+    selectedLead.value = preset.defaultLead;
+    heartRate.value = preset.heartRate;
+    heartRateMin.value = preset.heartRateMin;
+    heartRateMax.value = preset.heartRateMax;
+    duration.value = preset.duration;
+    samplingRate.value = preset.samplingRate;
+    stElevationBias.value = preset.stElevationBias;
+    noiseLevel.value = preset.noiseLevel;
+    hrvIntensity.value = preset.hrvIntensity;
+    lastPresetSwitch.value = Date.now();
+    scrollOffset.value = 0;
+
+    if (isMonitoring.value) {
+      analyzeECG();
+    }
+  }
+
+  /**
+   * Switch preset and run immediate analysis
+   */
+  function applyPresetAndAnalyze(presetId: PresetScenario) {
+    applyPreset(presetId);
+    analyzeECG();
   }
 
   function runFrontendAnalysis() {
@@ -382,10 +439,16 @@ export const useECGStore = defineStore('ecg', () => {
 
   return {
     // State
+    selectedPreset,
     selectedLead,
     heartRate,
+    heartRateMin,
+    heartRateMax,
     samplingRate,
     duration,
+    stElevationBias,
+    noiseLevel,
+    hrvIntensity,
     isMonitoring,
     ecgData,
     hrvData,
@@ -395,16 +458,21 @@ export const useECGStore = defineStore('ecg', () => {
     useBackend,
     backendUrl,
     scrollOffset,
+    lastPresetSwitch,
     // Getters
     currentSamples,
     currentRPeaks,
     currentHeartRate,
+    currentPreset,
+    presetList,
     // Actions
     analyzeECG,
     startMonitoring,
     stopMonitoring,
     selectLead,
     setHeartRate,
+    applyPreset,
+    applyPresetAndAnalyze,
     generateECGWaveform,
     detectRPeaks,
     calculateHRV,

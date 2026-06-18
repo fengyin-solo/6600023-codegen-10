@@ -27,6 +27,46 @@ class ArrhythmiaType(str, Enum):
     PVC = "premature_ventricular_contraction"
 
 
+class PresetScenario(str, Enum):
+    RESTING = "resting"
+    POST_EXERCISE = "post_exercise"
+    NIGHTTIME = "nighttime"
+
+
+PRESET_CONFIGS = {
+    PresetScenario.RESTING: {
+        "name": "静息状态",
+        "heart_rate": 72.0,
+        "duration": 10.0,
+        "sampling_rate": 500,
+        "default_lead": LeadName.II,
+        "st_elevation_bias": 0.0,
+        "noise_level": 0.02,
+        "hrv_intensity": 0.02,
+    },
+    PresetScenario.POST_EXERCISE: {
+        "name": "运动后监测",
+        "heart_rate": 125.0,
+        "duration": 15.0,
+        "sampling_rate": 500,
+        "default_lead": LeadName.V4,
+        "st_elevation_bias": 0.05,
+        "noise_level": 0.035,
+        "hrv_intensity": 0.04,
+    },
+    PresetScenario.NIGHTTIME: {
+        "name": "夜间监测",
+        "heart_rate": 58.0,
+        "duration": 30.0,
+        "sampling_rate": 250,
+        "default_lead": LeadName.II,
+        "st_elevation_bias": 0.0,
+        "noise_level": 0.01,
+        "hrv_intensity": 0.05,
+    },
+}
+
+
 class RPeak(BaseModel):
     index: int = Field(..., description="Sample index of R-peak")
     time: float = Field(..., description="Time in seconds")
@@ -58,9 +98,13 @@ class ECGLead(BaseModel):
 
 class ECGAnalysisRequest(BaseModel):
     lead_name: LeadName = Field(default=LeadName.II, description="ECG lead to analyze")
-    duration: float = Field(default=10.0, ge=1.0, le=60.0, description="Duration in seconds")
+    duration: float = Field(default=10.0, ge=1.0, le=120.0, description="Duration in seconds")
     sampling_rate: int = Field(default=500, ge=100, le=1000, description="Sampling rate in Hz")
     heart_rate: float = Field(default=72.0, ge=30, le=200, description="Simulated heart rate BPM")
+    preset_scenario: PresetScenario | None = Field(default=None, description="Preset scenario ID")
+    st_elevation_bias: float = Field(default=0.0, ge=0.0, le=0.3, description="ST-elevation bias in mV")
+    noise_level: float = Field(default=0.02, ge=0.0, le=0.1, description="Noise amplitude level")
+    hrv_intensity: float = Field(default=0.02, ge=0.0, le=0.1, description="HRV variation intensity")
 
 
 class ECGAnalysisResponse(BaseModel):

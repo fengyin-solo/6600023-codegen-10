@@ -81,6 +81,8 @@ def generate_ecg_signal(
     sampling_rate: int = 500,
     heart_rate: float = 72.0,
     noise_level: float = 0.02,
+    st_elevation_bias: float = 0.0,
+    hrv_intensity: float = 0.02,
     include_arrhythmia: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -92,6 +94,8 @@ def generate_ecg_signal(
         sampling_rate: Sampling rate in Hz
         heart_rate: Heart rate in BPM
         noise_level: Baseline noise amplitude
+        st_elevation_bias: Additional ST-segment elevation in mV
+        hrv_intensity: Intensity of HRV variation
         include_arrhythmia: Whether to simulate arrhythmia events
         
     Returns:
@@ -101,10 +105,12 @@ def generate_ecg_signal(
     t = np.linspace(0, duration, total_samples)
     ecg = np.zeros(total_samples)
 
-    lead_config = get_lead_config(lead_name)
+    base_lead_config = get_lead_config(lead_name)
+    lead_config = base_lead_config.copy()
+    lead_config["st_elevation"] = base_lead_config.get("st_elevation", 0.0) + st_elevation_bias
+
     cycle_duration = 60.0 / heart_rate
 
-    # Generate consecutive PQRST cycles
     beat_count = 0
     for start_time in np.arange(0, duration, cycle_duration):
         end_time = min(start_time + cycle_duration, duration)
@@ -114,14 +120,17 @@ def generate_ecg_signal(
 
         t_cycle = t[mask] - start_time
         
-        # Add slight HRV variation to each beat
-        hrv_factor = 1.0 + np.random.normal(0, 0.02)
+        beat_phase = beat_count * 0.7
+        hrv_factor = (
+            1.0
+            + np.sin(beat_phase) * hrv_intensity
+            + np.cos(beat_phase * 1.3) * hrv_intensity * 0.5
+        )
         modified_hr = heart_rate * hrv_factor
         cycle_config = lead_config.copy()
 
-        # Simulate arrhythmia if requested
         if include_arrhythmia and beat_count > 2:
-            if np.random.random() < 0.1:  # 10% chance of PVC
+            if np.random.random() < 0.1:
                 cycle_config["r_amplitude"] *= 1.8
                 cycle_config["t_amplitude"] *= -0.5
                 cycle_config["q_amplitude"] *= 0.5
@@ -129,10 +138,9 @@ def generate_ecg_signal(
         ecg[mask] += generate_pqrst_cycle(t_cycle, modified_hr, cycle_config)
         beat_count += 1
 
-    # Add baseline wander (low-frequency noise ~0.15 Hz)
     baseline_wander = 0.03 * np.sin(2 * np.pi * 0.15 * t)
+    baseline_wander += 0.015 * np.sin(2 * np.pi * 0.08 * t + 0.5)
     
-    # Add high-frequency noise (muscle artifact)
     noise = noise_level * np.random.randn(total_samples)
 
     ecg = ecg + baseline_wander + noise
